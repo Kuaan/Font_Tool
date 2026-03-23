@@ -3,7 +3,7 @@ from PIL import Image, ImageDraw, ImageFont
 
 st.set_page_config(page_title="Waveshare Font Tool", layout="wide")
 
-st.title("🖨️ ESP32 墨水屏取模工具 (16x21)")
+st.title("🖨️ ePaper 取模工具")
 st.caption("專為 Waveshare 1bit 顯示驅動設計，輸出 42 Bytes C 語言數組")
 
 # 側邊欄設定
