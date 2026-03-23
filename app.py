@@ -1,69 +1,72 @@
 import streamlit as st
 from PIL import Image, ImageDraw, ImageFont
+import math
 
-st.set_page_config(page_title="Waveshare Font Tool", layout="wide")
+st.set_page_config(page_title="Universal Font Tool", layout="wide")
 
-st.title("🖨️ ePaper 取模工具")
-st.caption("專為 Waveshare 1bit 顯示驅動設計，輸出 42 Bytes C 語言數組")
+st.title("🛠️ 通用嵌入式字體取模工具")
+st.caption("支援自定義長寬、逐行掃描、MSB First 格式")
 
-# 側邊欄設定
 with st.sidebar:
-    st.header("⚙️ 字體設定")
+    st.header("📐 尺寸與字體")
     uploaded_ttf = st.file_uploader("1. 上傳字體 (.ttf)", type="ttf")
-    font_size = st.number_input("2. 字體大小 (Font Size)", value=18, min_value=10, max_value=21)
-    y_offset = st.slider("3. 垂直微調 (Y Offset)", -5, 5, 0)
-    x_offset_manual = st.slider("4. 水平微調 (X Offset)", -5, 5, 0)
+    
+    col1, col2 = st.columns(2)
+    target_w = col1.number_input("畫布寬度 (px)", value=16, min_value=8, step=8)
+    target_h = col2.number_input("畫布高度 (px)", value=21, min_value=8, step=1)
+    
+    font_size = st.slider("字體大小", 10, target_h + 5, target_h - 3)
+    y_offset = st.slider("垂直微調", -10, 10, 0)
+    x_offset = st.slider("水平微調", -10, 10, 0)
 
-# 主要輸入區
-input_text = st.text_input("輸入要轉換的文字 (例如：設定溫度)", "設定")
+input_text = st.text_input("輸入文字", "設定")
 
 if uploaded_ttf and input_text:
-    # 暫存字體檔
     with open("temp_font.ttf", "wb") as f:
         f.write(uploaded_ttf.getbuffer())
     
     try:
         font = ImageFont.truetype("temp_font.ttf", font_size)
         results = []
-        preview_imgs = []
-
-        for char in input_text:
-            # 建立 16x21 畫布 (1 為白色背景)
-            img = Image.new('1', (16, 21), color=1)
+        
+        # 每行需要的位元組數 (例如 16px 寬需 2 bytes, 24px 需 3 bytes)
+        bytes_per_row = math.ceil(target_w / 8)
+        
+        st.write(f"當前設定：{target_w}x{target_h}，每個字佔用 {bytes_per_row * target_h} Bytes")
+        
+        preview_cols = st.columns(len(input_text))
+        
+        for i, char in enumerate(input_text):
+            # 建立畫布
+            img = Image.new('1', (target_w, target_h), color=1)
             draw = ImageDraw.Draw(img)
             
-            # 計算置中
+            # 置中計算
             bbox = draw.textbbox((0, 0), char, font=font)
             w, h = bbox[2] - bbox[0], bbox[3] - bbox[1]
-            x = (16 - w) // 2 - bbox[0] + x_offset_manual
-            y = (21 - h) // 2 - bbox[1] + y_offset
+            draw.text(((target_w - w)//2 - bbox[0] + x_offset, 
+                       (target_h - h)//2 - bbox[1] + y_offset), 
+                      char, font=font, fill=0)
             
-            # 繪製文字 (0 為黑色)
-            draw.text((x, y), char, font=font, fill=0)
-            preview_imgs.append(img.resize((80, 105), resample=Image.NEAREST)) # 放大預覽
+            # 顯示預覽
+            preview_cols[i].image(img.resize((target_w*4, target_h*4), resample=Image.NEAREST), caption=char)
 
-            # 轉換為 42 Bytes 代碼
+            # 取模核心邏輯
             data = []
-            for row in range(21):
-                byte1, byte2 = 0, 0
-                for col in range(8):
-                    if img.getpixel((col, row)) == 0: byte1 |= (1 << (7 - col))
-                    if img.getpixel((col + 8, row)) == 0: byte2 |= (1 << (7 - col))
-                data.append(f"0x{byte1:02X}")
-                data.append(f"0x{byte2:02X}")
+            for row in range(target_h):
+                for b in range(bytes_per_row):
+                    byte_val = 0
+                    for bit in range(8):
+                        pixel_x = b * 8 + bit
+                        if pixel_x < target_w: # 防止超過邊界
+                            if img.getpixel((pixel_x, row)) == 0:
+                                byte_val |= (1 << (7 - bit))
+                    data.append(f"0x{byte_val:02X}")
             
-            hex_str = ", ".join(data)
-            results.append(f'/*-- 文字: {char} --*/\n{{"{char}",\n{hex_str}}},')
+            results.append(f'/*-- {char} --*/\n{{"{char}",\n{", ".join(data)}}},')
 
-        # 顯示預覽與代碼
-        cols = st.columns(len(input_text))
-        for i, col in enumerate(cols):
-            col.image(preview_imgs[i], caption=input_text[i])
-
-        st.subheader("📋 C 語言代碼 (貼進 Font12CN_Table)")
+        st.subheader("📋 產出的 C 語言數組")
         st.code("\n\n".join(results), language="c")
 
     except Exception as e:
-        st.error(f"發生錯誤: {e}")
-else:
-    st.info("💡 請在左側上傳 .ttf 字體檔開始轉換。")
+        st.error(f"錯誤: {e}")
